@@ -1,0 +1,10 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Originals and derivatives are private. Only the server service identity
+    // accesses objects; authorized API routes stream them to workspace members.
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}
