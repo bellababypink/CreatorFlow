@@ -1,0 +1,10 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Stage 0 uses the authenticated Node API for every record operation.
+    // Firebase Admin bypasses these rules: server membership checks are mandatory.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
