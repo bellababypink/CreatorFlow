@@ -25,6 +25,7 @@ Last updated during Stage 0 implementation. “Implemented” and “verified”
 
 - [x] Type checking passed
 - [x] Automated tests passed
+- [x] GitHub Actions PR verification passed on Node 24/Linux (install, type check, tests, build)
 - [x] Production frontend build passed
 - [x] Browser QA passed for local account, onboarding, upload and reopening (live AI results pending)
 - [x] Local tenant-isolation tests passed for records and media endpoints

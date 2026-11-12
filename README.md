@@ -20,7 +20,7 @@ In a second terminal:
 npm run worker
 ```
 
-Use the local URL printed by Vite. Create your own account and workspace; no pilot brand is preloaded. Local accounts and uploads persist in `.data` across restarts. Local mode is explicitly a development mode, not the production authentication or storage backend. Production must use Firebase and does not fall back to local storage when cloud configuration is missing.
+Open `http://localhost:5173`, matching `APP_ORIGIN` in `.env.example`. Create your own account and workspace; no pilot brand is preloaded. Local accounts and uploads persist in `.data` across restarts. Local mode is explicitly a development mode, not the production authentication or storage backend. Production must use Firebase and does not fall back to local storage when cloud configuration is missing.
 
 Add `GEMINI_API_KEY` to the server environment to run genuine video analysis, then restart the worker. A key is never needed in the browser. Without it, upload/metadata behavior can be exercised but AI analysis remains blocked with an explicit setup status. Do not commit `.env`, `.data`, service account files or user footage.
 

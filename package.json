@@ -5,7 +5,7 @@
   "type": "module",
   "engines": { "node": ">=24" },
   "scripts": {
-    "dev": "concurrently -k -n api,web \"tsx watch server/index.ts\" \"vite --host 127.0.0.1\"",
+    "dev": "concurrently -k -n api,web \"node --import tsx --watch server/index.ts\" \"vite --host localhost\"",
     "worker": "node --import tsx server/worker.ts",
     "build": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
