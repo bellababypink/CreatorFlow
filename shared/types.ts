@@ -33,7 +33,8 @@ export interface Analysis extends VideoAnalysis {
 }
 export type JobStatus = 'queued' | 'processing' | 'completed' | 'failed' | 'blocked_configuration';
 export interface Job {
-  id: string; workspaceId: string; assetId: string; type: 'media_ingestion' | 'video_analysis';
+  id: string; workspaceId: string; assetId: string; type: 'media_ingestion' | 'video_analysis' | 'channel_sync' | 'channel_audit';
+  connectionId?: string; filters?: import('./channels').ChannelFilters;
   status: JobStatus; progress: number; stage: string; attempts: number; maxAttempts: number;
   error?: string | null; outputId?: string | null; createdAt: string; updatedAt: string;
   leaseUntil?: string | null; version: number;

@@ -169,3 +169,16 @@ Primary risks: cross-tenant access bugs, leaked credentials, oversized/malformed
 10. Verify authentication, tenant isolation, malformed uploads, persistence, worker behavior and configured live analysis; record unverified criteria explicitly.
 
 Acceptance procedures are in `STAGE_0_ACCEPTANCE.md`. Every future feature must audit existing code, preserve stored data, define acceptance criteria, implement real behavior, test it and update this document, the checklist and changelog.
+
+
+## Stage 1 implementation: Channel Intelligence
+
+The user's Stage 1 priority brings YouTube authorization and the shared analytics framework forward without replacing the Stage 0 media foundations. `server/channels` owns OAuth, token encryption, provider mapping, analytics/imports, audit generation, lifecycle cleanup, routes, and background task handling. `shared/channels.ts` defines the normalized contracts; the existing workspace role checks and API session remain authoritative.
+
+New workspace-owned collections are `socialConnections`, private `channelSecrets`, short-lived `channelOAuthStates`, `socialPosts`, `analyticsSnapshots`, optional `analyticsSnapshotParts`, `channelImports`, `channelAudits`, and private frozen `channelAuditInputs`. Stable imported IDs cannot overwrite OAuth-owned records. Source observations are immutable; a new import updates current observations without replacing newer values or confirmed creator context. Existing accounts, files, analyses, and roles require no destructive migration. The workspace's optional internal `channelRevision` defaults to zero for older records.
+
+Channel writes are transactional and fenced by workspace existence/deletion state, connection generation, optional dataset revision, and worker lease. Enqueue reserves the existing workspace job quota atomically. Disconnect disables authorization before purging records and dependent audit inputs; a cleanup lease prevents reconnect from racing the purge. Metadata work and Gemini audits run in the separate worker. The worker schedules eligible daily refreshes and handles stale inactive authorizations while it is running; deployed scheduling, deletion reconciliation, and failure monitoring remain operational acceptance gates.
+
+Metric values retain provider-native identifiers and definitions, provenance, units, lifetime/period/daily scope, exact reporting windows, observation times, and comparison cohorts. Neither a publication filter nor a cross-platform view changes those meanings. Missing metrics stay missing. Native YouTube content type, demographics, and source-video availability are not inferred. Source-video observations come only from a separately authorized linked Stage 0 asset.
+
+Audits preserve evidence IDs and frozen source values. Unsupported references, audience claims without audience reports, and unsupported numeric observations are rejected. Human review remains necessary for prose interpretation. Raw descriptive reports remain available without Gemini; a configuration or approval gap never becomes a synthetic successful audit. See `CHANNEL_INTELLIGENCE.md` and `STAGE_1_ACCEPTANCE.md` for provider setup, restrictions, tests, and the live release gate.

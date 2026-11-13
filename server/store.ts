@@ -11,11 +11,31 @@ type RecordData = {
     workspaceId?: string;
     [key: string]: any;
 };
-type Write = {
+export type Write = {
     collection: string;
     value: RecordData;
 };
+export interface ChannelWriteGuards {
+    jobId?: string; workerId?: string; importId?: string; dataRevision?: number; bumpRevision?: boolean;
+}
+function checkChannelCommit(workspace: any, connection: any, workspaceId: string, connectionId: string | null, generation: number | null, writes: Write[], job: any, guards: ChannelWriteGuards) {
+    if (!workspace || workspace.deleting) throw new HttpError(409, 'This workspace is unavailable.', 'WORKSPACE_UNAVAILABLE');
+    if (guards.dataRevision !== undefined && (workspace.channelRevision || 0) !== guards.dataRevision) throw new HttpError(409, 'Channel data changed while this operation ran. Please try again.', 'CHANNEL_DATA_CHANGED');
+    if (connectionId) {
+        const replacement = writes.find(w => w.collection === 'socialConnections' && w.value.id === connectionId)?.value;
+        if (!connection && generation === 0) {
+            if (!replacement || replacement.generation !== 1) throw new HttpError(409, 'The new connection is invalid.');
+        } else if (!connection || connection.workspaceId !== workspaceId || connection.generation !== generation || (connection.disconnectedAt && !(replacement?.generation === generation! + 1 && replacement.disconnectedAt === null))) {
+            throw new HttpError(409, 'This channel authorization changed. Reconnect before continuing.', 'CHANNEL_AUTH_CHANGED');
+        }
+    }
+    if (guards.jobId && (!job || job.workspaceId !== workspaceId || job.workerId !== guards.workerId || job.status !== 'processing' || Date.parse(job.leaseUntil || '') < Date.now())) throw new HttpError(409, 'This background job no longer owns its lease.', 'JOB_LEASE_LOST');
+    if(writes.some(w=>Buffer.byteLength(JSON.stringify(w.value),'utf8')>900_000))throw new HttpError(413,'This channel record exceeds the storage size limit. Use a smaller analytics selection.','CHANNEL_RECORD_LIMIT');
+    if (writes.length > 400 || writes.some(w => w.value.workspaceId !== workspaceId)) throw new Error('Invalid workspace-owned channel write.');
+}
 export interface Store {
+    commitChannelWrites(workspaceId: string, connectionId: string | null, generation: number | null, writes: Write[], guards?: ChannelWriteGuards): Promise<void>;
+    enqueueChannelJob(job: StoredJob): Promise<StoredJob>;
     get<T = RecordData>(collection: string, id: string): Promise<T | null>;
     put<T extends {
         id: string;
@@ -73,6 +93,31 @@ class SQLiteStore implements Store {
     db = new DatabaseSync(path.join(config.dataDir, 'creatorflow.sqlite'));
     constructor() {
         this.db.exec('PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000; CREATE TABLE IF NOT EXISTS records (collection TEXT NOT NULL, id TEXT NOT NULL, workspace_id TEXT, data TEXT NOT NULL, PRIMARY KEY(collection,id)); CREATE INDEX IF NOT EXISTS records_workspace ON records(collection,workspace_id);');
+    }
+    async commitChannelWrites(workspaceId: string, connectionId: string | null, generation: number | null, writes: Write[], guards: ChannelWriteGuards = {}) {
+        this.db.exec('BEGIN IMMEDIATE');
+        try {
+            const read = (collection: string, id: string) => { const row = this.db.prepare('SELECT data FROM records WHERE collection=? AND id=?').get(collection, id) as any; return row ? JSON.parse(row.data) : null; };
+            const write = (collection: string, value: RecordData) => this.db.prepare('INSERT INTO records(collection,id,workspace_id,data) VALUES(?,?,?,?) ON CONFLICT(collection,id) DO UPDATE SET workspace_id=excluded.workspace_id,data=excluded.data').run(collection, value.id, value.workspaceId || null, JSON.stringify(value));
+            const workspace = read('workspaces', workspaceId);
+            checkChannelCommit(workspace, connectionId ? read('socialConnections', connectionId) : null, workspaceId, connectionId, generation, writes, guards.jobId ? read('jobs', guards.jobId) : null, guards);
+            if (guards.importId && read('channelImports', guards.importId)) throw new HttpError(409, 'This exact analytics file has already been imported.', 'IMPORT_ALREADY_EXISTS');
+            for (const op of writes) write(op.collection, op.value);
+            if (guards.bumpRevision || writes.some(w => ['socialConnections', 'socialPosts', 'analyticsSnapshots', 'channelImports'].includes(w.collection))) write('workspaces', {...workspace, channelRevision: (workspace.channelRevision || 0) + 1});
+            this.db.exec('COMMIT');
+        } catch (error) { this.db.exec('ROLLBACK'); throw error; }
+    }
+    async enqueueChannelJob(input: StoredJob) {
+        this.db.exec('BEGIN IMMEDIATE');
+        try {
+            const read = (collection: string, id: string) => {const row = this.db.prepare('SELECT data FROM records WHERE collection=? AND id=?').get(collection, id) as any; return row ? JSON.parse(row.data) : null;};
+            const workspace = enqueueWorkspace(read('workspaces', input.workspaceId), 0);
+            const previous = read('jobs', input.id);
+            if (previous && ['queued', 'processing'].includes(previous.status)) throw new HttpError(409, 'This operation is already in the creative queue.', 'JOB_EXISTS');
+            const job = {...input, slotReserved: true, version: (previous?.version || 0) + 1};
+            for (const [collection, value] of [['workspaces', workspace], ['jobs', job]] as const) this.db.prepare('INSERT INTO records(collection,id,workspace_id,data) VALUES(?,?,?,?) ON CONFLICT(collection,id) DO UPDATE SET workspace_id=excluded.workspace_id,data=excluded.data').run(collection, value.id, 'workspaceId' in value ? String(value.workspaceId) : null, JSON.stringify(value));
+            this.db.exec('COMMIT'); return job;
+        } catch (error) { this.db.exec('ROLLBACK'); throw error; }
     }
     async get<T>(collection: string, id: string): Promise<T | null> {
         const row = this.db.prepare('SELECT data FROM records WHERE collection=? AND id=?').get(collection, id) as {
@@ -255,6 +300,29 @@ class SQLiteStore implements Store {
 class FirestoreStore implements Store {
     db;
     constructor() { initializeFirebase(); this.db = getFirestore(); }
+    async commitChannelWrites(workspaceId: string, connectionId: string | null, generation: number | null, writes: Write[], guards: ChannelWriteGuards = {}) {
+        await this.db.runTransaction(async tx => {
+            const workspaceRef = this.db.collection('workspaces').doc(workspaceId);
+            const workspace = (await tx.get(workspaceRef)).data();
+            const connection = connectionId ? (await tx.get(this.db.collection('socialConnections').doc(connectionId))).data() : null;
+            const job = guards.jobId ? (await tx.get(this.db.collection('jobs').doc(guards.jobId))).data() : null;
+            const imported = guards.importId ? (await tx.get(this.db.collection('channelImports').doc(guards.importId))).exists : false;
+            checkChannelCommit(workspace, connection, workspaceId, connectionId, generation, writes, job, guards);
+            if (imported) throw new HttpError(409, 'This exact analytics file has already been imported.', 'IMPORT_ALREADY_EXISTS');
+            for (const op of writes) tx.set(this.db.collection(op.collection).doc(op.value.id), JSON.parse(JSON.stringify(op.value)));
+            if (guards.bumpRevision || writes.some(w => ['socialConnections', 'socialPosts', 'analyticsSnapshots', 'channelImports'].includes(w.collection))) tx.update(workspaceRef, {channelRevision: (workspace!.channelRevision || 0) + 1});
+        });
+    }
+    async enqueueChannelJob(input: StoredJob) {
+        return this.db.runTransaction(async tx => {
+            const workspaceRef = this.db.collection('workspaces').doc(input.workspaceId), jobRef = this.db.collection('jobs').doc(input.id);
+            const workspace = enqueueWorkspace((await tx.get(workspaceRef)).data() as StoredWorkspace || null, 0);
+            const previous = (await tx.get(jobRef)).data();
+            if (previous && ['queued','processing'].includes(previous.status)) throw new HttpError(409, 'This operation is already in the creative queue.', 'JOB_EXISTS');
+            const job = {...input, slotReserved: true, version: (previous?.version || 0) + 1};
+            tx.set(workspaceRef, JSON.parse(JSON.stringify(workspace))); tx.set(jobRef, JSON.parse(JSON.stringify(job))); return job;
+        });
+    }
     async get<T>(collection: string, id: string): Promise<T | null> { const snap = await this.db.collection(collection).doc(id).get(); return snap.exists ? snap.data() as T : null; }
     async put<T extends {
         id: string;

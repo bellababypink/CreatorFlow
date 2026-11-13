@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.0 — Channel Intelligence, 2026-11-13
+
+- Replaced the channel placeholder with real setup/connection controls, source-labelled analytics, filters, post evidence, manual imports, and downloadable reports while preserving the existing app.
+- Added the first authorized provider adapter for YouTube, including secure OAuth/PKCE, encrypted tokens, refresh/revocation, bounded synchronization, and native Analytics reports.
+- Added asynchronous Gemini channel audits backed by selected source records, frozen evidence, and strict reference/numeric validation.
+- Added transactional channel jobs and writes, stale-work/reconnect fencing, scoped deletion/export, and bounded snapshot storage.
+- Verified 55 tests, TypeScript, production build, and the isolated browser import/filter/post-context/report workflow. Live Google/Gemini acceptance remains pending configuration; Instagram and TikTok live adapters remain gated.
+
 ## 0.1.0 — Stage 0 implementation, 2026-11-12
 
 - Established the architecture for workspace-owned identity, media, analysis and durable background jobs.
