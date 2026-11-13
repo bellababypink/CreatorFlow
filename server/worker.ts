@@ -3,6 +3,7 @@ import { mkdir, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { store } from './store.js';
 import { config } from './config.js';
+import { processChannelJob, maintainChannels } from './channels/worker.js';
 import { materializeFile, putFile } from './storage.js';
 import { inspectMedia, createThumbnail, analyzeVideo, ProcessingError } from './processing/index.js';
 import type { StoredAsset, StoredJob, StoredWorkspace } from './models.js';
@@ -22,6 +23,7 @@ async function finish(job: StoredJob, patch: Partial<StoredJob>, writes: {
     await store.finishJob(job.id, workerId, patch, writes);
 }
 export async function processJob(job: StoredJob) {
+    if (job.type === 'channel_sync' || job.type === 'channel_audit') return processChannelJob(job, workerId);
     const workDir = path.join(config.dataDir, 'tmp', `job-${job.id}-${workerId}`);
     await mkdir(workDir, { recursive: true, mode: 0o700 });
     let asset = await store.get<StoredAsset>('assets', job.assetId);
@@ -74,6 +76,7 @@ async function main() {
     await heartbeat();
     const interval = setInterval(() => heartbeat().catch(() => { }), 10000);
     let nextRecoveryAt = 0;
+    let nextChannelMaintenanceAt = 0;
     for (const signal of ['SIGINT', 'SIGTERM'])
         process.on(signal, () => { stopping = true; });
     while (!stopping) {
@@ -81,6 +84,10 @@ async function main() {
             if (Date.now() >= nextRecoveryAt) {
                 await recoverExhaustedJobs();
                 nextRecoveryAt = Date.now() + 60_000;
+            }
+            if (Date.now() >= nextChannelMaintenanceAt) {
+                await maintainChannels().catch(() => console.error('Channel maintenance could not complete'));
+                nextChannelMaintenanceAt = Date.now() + 60 * 60 * 1000;
             }
             const job = await store.claimJob(workerId);
             if (job)

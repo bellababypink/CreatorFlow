@@ -1,10 +1,12 @@
 import type { ProviderStatus } from '../../shared/types.js';
 import { mediaToolStatus } from '../processing/media.js';
+import { getYouTubeIntegration } from '../channels/youtube.js';
 
 /** Configuration is distinct from an authorized, tested provider connection. */
 export async function getProviderStatuses(): Promise<ProviderStatus[]> {
   const tools = await mediaToolStatus();
   const geminiConfigured = Boolean(process.env.GEMINI_API_KEY);
+  const youtube = getYouTubeIntegration();
   const firebaseConfigured = process.env.APP_MODE === 'firebase' && Boolean(process.env.FIREBASE_PROJECT_ID);
   return [
     {
@@ -30,23 +32,23 @@ export async function getProviderStatuses(): Promise<ProviderStatus[]> {
       authRequirements: ['Firebase web configuration', 'Application Default Credentials', 'Private Cloud Storage bucket'],
     },
     {
-      id: 'youtube', name: 'YouTube', category: 'social', status: 'planned', configured: false,
-      capabilities: [],
-      message: 'Not connected. A future OAuth adapter can access authorized posts and permitted Analytics reports.',
+      id: 'youtube', name: 'YouTube', category: 'social', status: youtube.status, configured: youtube.configured,
+      capabilities: ['authorized_channel_profile','published_posts','available_analytics','refresh_and_revoke'],
+      message: youtube.message,
       authRequirements: ['Google OAuth application', 'User consent', 'Approved scopes and verification where required'],
       limits: ['Metric availability depends on scopes, report type, and channel ownership.'],
     },
     {
-      id: 'instagram', name: 'Instagram', category: 'social', status: 'planned', configured: false,
+      id: 'instagram', name: 'Instagram', category: 'social', status: 'Unavailable', configured: false,
       capabilities: [],
-      message: 'Not connected. Official professional-account authorization and Meta review are required before enabling access.',
+      message: 'Live adapter deferred until the first YouTube provider is verified. Manual imports are available.',
       authRequirements: ['Meta application', 'Eligible professional account', 'User authorization', 'Required app review'],
       limits: ['Consumer accounts and unsupported metrics cannot be accessed.'],
     },
     {
-      id: 'tiktok', name: 'TikTok', category: 'social', status: 'planned', configured: false,
+      id: 'tiktok', name: 'TikTok', category: 'social', status: 'Unavailable', configured: false,
       capabilities: [],
-      message: 'Not connected. Display and publishing access are separate approved integrations.',
+      message: 'Live adapter deferred until the first YouTube provider is verified. Manual imports are available.',
       authRequirements: ['TikTok developer application', 'Login Kit and applicable API approval', 'User consent'],
       limits: ['Display API does not imply full creator analytics or publishing permission.'],
     },

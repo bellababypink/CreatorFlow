@@ -16,10 +16,13 @@ import { publicAsset, publicWorkspace } from './models.js';
 import type { StoredAsset, StoredJob, StoredWorkspace } from './models.js';
 import type { Analysis, User } from '../shared/types.js';
 import { getProviderStatuses } from './providers/index.js';
+import { channelsRouter, youtubeOAuthCallback } from './channels/routes.js';
+import { revokeYouTubeConnection } from './channels/oauth.js';
 export const app = express();
 app.disable('x-powered-by');
 app.use((_req, res, next) => { res.set({ 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'same-origin', 'Cross-Origin-Resource-Policy': 'same-origin' }); next(); });
 app.use('/api', (_req, res, next) => { res.set('Cache-Control', 'private, no-store'); next(); });
+app.use('/api/workspaces/:workspaceId/channels/imports', express.json({ limit: '256kb' }));
 app.use(express.json({ limit: '128kb' }));
 app.use(cookieParser());
 app.use((req, _res, next) => {
@@ -120,6 +123,8 @@ app.post('/api/auth/firebase', async (req, res) => {
     }
 });
 app.post('/api/auth/signout', async (req, res) => { await deleteSession(req, res); res.json({ success: true }); });
+app.get('/api/channels/oauth/youtube/callback', authenticate, youtubeOAuthCallback);
+app.use('/api/workspaces/:workspaceId/channels', channelsRouter);
 app.get('/api/me', authenticate, async (req, res) => {
     const memberships = await store.list<any>('memberships', 'userId', req.user!.id);
     const workspaces = await Promise.all(memberships.map(async (m) => { const w = await store.get<StoredWorkspace>('workspaces', m.workspaceId); return w ? { ...publicWorkspace(w), role: m.role } : null; }));
@@ -244,7 +249,7 @@ app.get('/api/workspaces/:workspaceId/providers', authenticate, read, async (_re
 app.get('/api/workspaces/:workspaceId/export', authenticate, admin, async (req, res) => {
     const workspaceId = String(req.params.workspaceId), workspace = await store.get<StoredWorkspace>('workspaces', workspaceId);
     const data: any = { exportedAt: new Date().toISOString(), schemaVersion: 1, workspace: workspace && publicWorkspace(workspace) };
-    for (const collection of ['memberships', 'assets', 'analyses', 'jobs', 'auditLogs', 'usage'])
+    for (const collection of ['memberships', 'assets', 'analyses', 'jobs', 'auditLogs', 'usage', 'socialConnections', 'socialPosts', 'analyticsSnapshots', 'analyticsSnapshotParts', 'channelImports', 'channelAudits'])
         data[collection] = await store.list<any>(collection, 'workspaceId', workspaceId);
     data.assets = data.assets.map(publicAsset);
     res.set('Content-Disposition', `attachment; filename="creatorflow-${workspaceId}.json"`);
@@ -262,6 +267,9 @@ app.delete('/api/workspaces/:workspaceId', authenticate, workspaceAccess(['owner
             throw new HttpError(409, 'Wait for active media jobs to finish before deleting this workspace.');
         return { ...current, deleting: true };
     });
+    for (const connection of await store.list<any>('socialConnections', 'workspaceId', workspaceId)) {
+        if (connection.source === 'oauth' && connection.provider === 'youtube' && !connection.disconnectedAt) await revokeYouTubeConnection(connection.id, workspaceId).catch(() => {});
+    }
     const assets = await store.list<StoredAsset>('assets', 'workspaceId', workspaceId);
     for (const asset of assets) {
         await deleteFile(asset.storageKey);
@@ -272,7 +280,7 @@ app.delete('/api/workspaces/:workspaceId', authenticate, workspaceAccess(['owner
         collection: string;
         id: string;
     }[] = [];
-    for (const collection of ['memberships', 'assets', 'analyses', 'jobs', 'auditLogs', 'usage', 'assetDigests', 'assetDeletions'])
+    for (const collection of ['memberships', 'assets', 'analyses', 'jobs', 'auditLogs', 'usage', 'assetDigests', 'assetDeletions', 'socialConnections', 'socialPosts', 'analyticsSnapshots', 'analyticsSnapshotParts', 'channelImports', 'channelAudits', 'channelAuditInputs', 'channelSecrets', 'channelOAuthStates'])
         for (const record of await store.list<any>(collection, 'workspaceId', workspaceId))
             deletes.push({ collection, id: record.id });
     for (let index = 0; index < deletes.length; index += 400)
