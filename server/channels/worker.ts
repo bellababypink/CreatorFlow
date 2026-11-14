@@ -11,6 +11,7 @@ import { generateChannelAudit } from './audits.js';
 import { assertAuditReady, captureOverview, channelConnection, channelJob } from './service.js';
 import { snapshotWrites } from './snapshots.js';
 import { purgeChannelData } from './lifecycle.js';
+import { approvedCreativeContext } from '../dna/service.js';
 
 export async function processChannelJob(job: StoredJob, workerId: string) {
   const progress = async (value: number, stage: string) => {
@@ -53,10 +54,11 @@ export async function processChannelJob(job: StoredJob, workerId: string) {
       await progress(30, 'Gemini is reviewing the available evidence');
       const frozenOverview={...capture.overview,posts:capture.overview.posts.slice(0,100),snapshots:capture.overview.snapshots.slice(0,10).map(({postMetrics,...snapshot})=>snapshot)};
       if(Buffer.byteLength(JSON.stringify(frozenOverview),'utf8')>850_000)throw new HttpError(413,'Select a smaller evidence set before generating this audit.');
-      const audit=await generateChannelAudit({workspaceId:job.workspaceId,overview:capture.overview,workspace:capture.workspace,mediaAnalyses});
+      const creativeContext=await approvedCreativeContext(job.workspaceId);
+      const audit=await generateChannelAudit({workspaceId:job.workspaceId,overview:capture.overview,workspace:capture.workspace,mediaAnalyses,creativeContext});
       await store.commitChannelWrites(job.workspaceId,null,null,[
         {collection:'channelAudits',value:audit},
-        {collection:'channelAuditInputs',value:{id:audit.id,workspaceId:job.workspaceId,overview:frozenOverview,createdAt:audit.createdAt,version:1}},
+        {collection:'channelAuditInputs',value:{id:audit.id,workspaceId:job.workspaceId,overview:frozenOverview,creativeContext,createdAt:audit.createdAt,version:1}},
         {collection:'usage',value:{id:randomUUID(),workspaceId:job.workspaceId,jobId:job.id,provider:'gemini',model:audit.model,tokens:audit.usage||{},costStatus:'unpriced',operation:'channel_audit',createdAt:new Date().toISOString()}},
       ],{jobId:job.id,workerId,dataRevision:capture.revision});
       await store.finishJob(job.id,workerId,{status:'completed',progress:100,stage:'Evidence-based channel audit saved',error:null,outputId:audit.id});

@@ -4,6 +4,8 @@ import path from 'node:path';
 import { store } from './store.js';
 import { config } from './config.js';
 import { processChannelJob, maintainChannels } from './channels/worker.js';
+import { processDNAJob } from './dna/worker.js';
+import { approvedCreativeContext } from './dna/service.js';
 import { materializeFile, putFile } from './storage.js';
 import { inspectMedia, createThumbnail, analyzeVideo, ProcessingError } from './processing/index.js';
 import type { StoredAsset, StoredJob, StoredWorkspace } from './models.js';
@@ -23,6 +25,7 @@ async function finish(job: StoredJob, patch: Partial<StoredJob>, writes: {
     await store.finishJob(job.id, workerId, patch, writes);
 }
 export async function processJob(job: StoredJob) {
+    if (job.type === 'style_analysis') return processDNAJob(job, workerId);
     if (job.type === 'channel_sync' || job.type === 'channel_audit') return processChannelJob(job, workerId);
     const workDir = path.join(config.dataDir, 'tmp', `job-${job.id}-${workerId}`);
     await mkdir(workDir, { recursive: true, mode: 0o700 });
@@ -43,8 +46,9 @@ export async function processJob(job: StoredJob) {
         asset = { ...asset, thumbnailKey, thumbnailReady: true, updatedAt: now(), version: asset.version + 1 };
         await progress(job, 25, 'Preparing Gemini video analysis', asset);
         const workspace = await store.get<StoredWorkspace>('workspaces', job.workspaceId);
-        const result = await analyzeVideo({ filePath: source, mimeType: asset.mimeType, metadata, brandContext: workspace ? JSON.stringify({ creatorType: workspace.creatorType, niches: workspace.niches, goals: workspace.goals, brandStyle: workspace.brandStyle }) : undefined, onProgress: (value, stage) => progress(job, value, stage) });
-        const analysis: Analysis = { ...result, id: randomUUID(), workspaceId: job.workspaceId, assetId: job.assetId, createdAt: now(), version: 1 };
+        const creativeContext = workspace ? await approvedCreativeContext(workspace.id) : undefined;
+        const result = await analyzeVideo({ filePath: source, mimeType: asset.mimeType, metadata, brandContext: workspace ? { creatorType: workspace.creatorType, niches: workspace.niches, goals: workspace.goals, creativeContext } : undefined, onProgress: (value, stage) => progress(job, value, stage) });
+        const analysis: Analysis = { ...result, ...(creativeContext ? { creativeContext } : {}), id: randomUUID(), workspaceId: job.workspaceId, assetId: job.assetId, createdAt: now(), version: 1 };
         await finish(job, { status: 'completed', progress: 100, stage: 'Analysis saved', error: null, outputId: analysis.id }, [{ collection: 'analyses', value: analysis }, { collection: 'assets', value: { ...asset, status: 'ready', analysisId: analysis.id, updatedAt: now(), version: asset.version + 1 } }, { collection: 'usage', value: { id: randomUUID(), workspaceId: job.workspaceId, jobId: job.id, assetId: job.assetId, provider: 'gemini', model: result.model, inputBytes: asset.sizeBytes, videoSeconds: metadata.durationSeconds, tokens: result.usage || {}, costStatus: 'unpriced', createdAt: now() } }]);
     }
     catch (error) {

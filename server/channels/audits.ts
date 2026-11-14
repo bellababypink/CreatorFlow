@@ -20,7 +20,7 @@ const responseJsonSchema = {
   type:'object',properties:{summary:{type:'string'},findings:{type:'array',items:{type:'object',properties:{category:{type:'string',enum:['strength','weakness','theme','pillar','experiment','audience','limitation']},title:{type:'string'},detail:{type:'string'},evidencePostIds:{type:'array',items:{type:'string'}},evidenceSnapshotIds:{type:'array',items:{type:'string'}},confidence:{type:'string',enum:['low','medium','high']}},required:['category','title','detail','evidencePostIds','evidenceSnapshotIds','confidence']}},limitations:{type:'array',items:{type:'string'}}},required:['summary','findings','limitations'],
 };
 export interface AuditInput {
-  workspaceId:string;overview:ChannelOverview;workspace?:Workspace;
+  workspaceId:string;overview:ChannelOverview;workspace?:Workspace;creativeContext?:import('../../shared/dna.js').CreativeContext;
   mediaAnalyses?:Record<string,Analysis>;
   onProgress?:(progress:number,stage:string)=>Promise<void>|void;
 }
@@ -89,7 +89,7 @@ export async function generateChannelAudit(input: AuditInput): Promise<ChannelAu
     return [{postId:post.id,assetId:analysis.assetId,summary:analysis.summary.slice(0,2500),segments:analysis.segments.slice(0,5).map(segment=>({...segment,description:segment.description.slice(0,1000)})),timestampPrecision:analysis.timestampPrecision}];
   });
   const evidence = {
-    workspace:{name:input.workspace?.name || '',niches:input.workspace?.niches || [],goals:input.workspace?.goals || [],voice:input.workspace?.brandStyle?.voice || ''},
+    workspace:{name:input.workspace?.name || '',niches:input.workspace?.niches || [],goals:input.workspace?.goals || [],creativeContext:input.creativeContext || null},
     filters:input.overview.filters,coverage:input.overview.coverage,
     posts:posts.map(post=>({id:post.id,provider:post.provider,connectionId:post.connectionId,source:post.source,title:post.title,caption:post.caption.slice(0,800),publishedAt:post.publishedAt,durationSeconds:post.durationSeconds,contentType:post.contentType,pillar:post.pillar,pillarSource:post.pillarSource,tags:post.tags.slice(0,20),metrics:post.metrics})),
     snapshots:snapshots.map(snapshot=>({id:snapshot.id,provider:snapshot.provider,connectionId:snapshot.connectionId,observedAt:snapshot.observedAt,periodStart:snapshot.periodStart,periodEnd:snapshot.periodEnd,accountMetrics:snapshot.accountMetrics,audience:snapshot.audience,daily:snapshot.daily.slice(-90),coverage:snapshot.coverage})),

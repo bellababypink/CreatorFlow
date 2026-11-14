@@ -1,6 +1,6 @@
 # CreatorFlow AI architecture
 
-Status: Stage 0 implementation, November 2026. This document separates the target product from the implemented vertical slice. See `FEATURES.md` for completion and verification evidence.
+Status: Stages 0–2 implementation, November 2026. This document separates the target product from the implemented vertical slice. See `FEATURES.md` for completion and verification evidence.
 
 ## 1. Product structure
 
@@ -182,3 +182,20 @@ Channel writes are transactional and fenced by workspace existence/deletion stat
 Metric values retain provider-native identifiers and definitions, provenance, units, lifetime/period/daily scope, exact reporting windows, observation times, and comparison cohorts. Neither a publication filter nor a cross-platform view changes those meanings. Missing metrics stay missing. Native YouTube content type, demographics, and source-video availability are not inferred. Source-video observations come only from a separately authorized linked Stage 0 asset.
 
 Audits preserve evidence IDs and frozen source values. Unsupported references, audience claims without audience reports, and unsupported numeric observations are rejected. Human review remains necessary for prose interpretation. Raw descriptive reports remain available without Gemini; a configuration or approval gap never becomes a synthetic successful audit. See `CHANNEL_INTELLIGENCE.md` and `STAGE_1_ACCEPTANCE.md` for provider setup, restrictions, tests, and the live release gate.
+
+
+## Stage 2 implementation: Creator DNA and Style Intelligence
+
+`shared/dna.ts` is the typed creative contract. `server/dna` owns references, extraction, profile approval, preset history, creative-context resolution and production briefs. The existing private Media Vault, workspace roles, durable queue and separate worker are reused. No stored account, media or channel records are rebuilt or destructively migrated.
+
+Workspace-owned records are `dnaProfiles`, immutable `dnaProfileRevisions`, `styleReferences`, `styleAnalyses`, `stylePresets`, immutable `stylePresetRevisions`, and `productionProjects`. The current profile ID equals the workspace ID. Revisions use `<entity>_v<number>` IDs. Reference/analysis links preserve the exact reference version. Preset restoration appends a new revision rather than overwriting history. Queries use existing single-field workspace indexes; no new composite query is required.
+
+Creator-supplied legacy preferences remain available in a version-zero profile until explicitly saved; legacy detected/suggested brand fields are not promoted. The profile stores only creator-entered or explicitly adopted preferences and records adoption provenance. AI analyses remain separate. A locked guide rejects preference changes and adoption until an owner/administrator unlocks it. Independently versioned named presets remain editable. A production brief resolves the selected preset over the creator profile and stores the complete context snapshot, guide status, profile version and preset revision. Later changes cannot rewrite that snapshot. This is a saved production brief, not a playable editor or a simulated render.
+
+`resolveCreativeContext` supplies the same contract to production, media analysis and channel audits; audits and media analyses retain the context used. Planning, writing, editing and publishing providers should consume this contract when those features are implemented, rather than inferring new brand rules from reference analyses.
+
+Reference links are saved without fetching or scraping. Creator-owned or authorized video references point to existing private workspace assets. Plain text/Markdown documents are limited to 50 KB; PDF and Word parsing are not claimed. Video jobs inspect the source, decode scene changes with FFmpeg, and then call Gemini with the actual video through its Files API. Cut measurements use decoded frame timestamps; they are threshold-based estimates with flash/motion/dissolve limitations, not verified edit decisions. Gemini findings include approximate evidence ranges or literal document quotations, confidence, model, usage and limitations. Exact font, track, artist or licensing identification is not asserted. Missing Gemini configuration can save genuine technical measurements but never substitutes invented creative patterns.
+
+Creative writes check workspace availability, expected record versions, source deletion state and worker leases in SQLite or Firestore transactions. Successful style output, reference linkage, terminal job state and quota release commit together. Stale workers cannot overwrite newer references or resurrect deleted sources. Workspace deletion/export includes all seven creative collections. Source-video deletion also removes source-derived references/analyses; creator-approved preferences and production snapshots remain independent creator decisions. Failed or interrupted operations remain visible in the creative queue.
+
+Stage 2 adds decoding CPU, temporary Gemini transfer, inference tokens and version-history storage to the existing cost model. Workspace job concurrency, input duration/size limits, bounded subprocesses/provider deadlines, reference/preset limits and usage records constrain the pilot. Live Gemini/Firebase verification, operational monitoring and a real editable timeline/rendering path remain separate acceptance gates.

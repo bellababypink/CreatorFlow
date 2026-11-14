@@ -4,6 +4,8 @@ CreatorFlow is a creator workspace built around a real account → workspace →
 
 Stage 1 adds Channel Intelligence to the existing foundation: a real YouTube OAuth adapter, separate synchronization and audit jobs, normalized source-labelled analytics, CSV preview/import for all three platforms, post-to-footage links, and downloadable evidence/audit reports. Live YouTube acceptance and Gemini execution require server configuration; no account is connected by default. Instagram and TikTok live adapters remain gated until the first provider is verified. Advanced editing, rendering, and publishing remain later stages. No sample analysis or performance metrics substitute for real provider results.
 
+Stage 2 adds Creator DNA: an editable, lockable creative guide, an authorized reference library, FFmpeg scene measurements, genuine Gemini style extraction, named versioned presets, and production briefs with pinned creative settings. Detected patterns require explicit adoption. Social links are bookmarks rather than downloaded footage; text and Markdown brand briefs are supported. See [Creator DNA](docs/CREATOR_DNA.md) and [Stage 2 acceptance](docs/STAGE_2_ACCEPTANCE.md). Live Gemini extraction still requires server credentials and acceptance against real creator footage.
+
 ## Run locally
 
 Requirements: Node.js 24+, npm, FFmpeg and FFprobe. Install native media tools through your operating system package manager. Keep the API and worker on the same machine in local mode so they share the SQLite database and private `.data` directory.
@@ -55,6 +57,8 @@ The Node/FFmpeg worker cannot be deployed as a static website or Cloudflare Work
 - [Stage 0 acceptance procedures](docs/STAGE_0_ACCEPTANCE.md)
 - [Channel Intelligence and OAuth setup](docs/CHANNEL_INTELLIGENCE.md)
 - [Stage 1 acceptance procedures](docs/STAGE_1_ACCEPTANCE.md)
+- [Creator DNA and style intelligence](docs/CREATOR_DNA.md)
+- [Stage 2 acceptance procedures](docs/STAGE_2_ACCEPTANCE.md)
 - [Deployment and operations](docs/DEPLOYMENT.md)
 - [Changelog](CHANGELOG.md)
 
