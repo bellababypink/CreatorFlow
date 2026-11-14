@@ -81,3 +81,29 @@ Tests include injected provider-protocol responses and isolated HTTP/database fi
 - [ ] Reconciliation/cleanup for originals orphaned if an API process stops after object storage succeeds but before the asset/job transaction commits
 
 Do not mark a deferred feature complete because a route or provider registry entry exists. Mark Stage 0 implementation items only after the corresponding code is present; mark verification only after the relevant check actually runs successfully.
+
+
+## Stage 2: Creator DNA & Style Intelligence
+
+- [x] Reused existing accounts, workspace authorization, private Media Vault, asynchronous worker and channel framework without rebuilding stored records
+- [x] Visual Style DNA dashboard and all 14 editable creative sections, including personality, pillars, voice, palette, typography, rhythm, captions and audio
+- [x] Explicit creator preferences, detected patterns, adoption provenance and immutable guide revisions remain separate
+- [x] Owner/administrator locking prevents guide edits and adoption until unlocked; named preset overrides are clearly independent revisions
+- [x] Reference library for authorized workspace videos, public HTTPS bookmarks and supplied text/Markdown brand instructions; comparison preserves missing evidence
+- [x] Real FFmpeg scene-change measurements, source-frame timestamps, mean/median intervals and clear detector limitations
+- [x] Genuine Gemini Files/text extraction implementation with bounded output, evidence ranges/quotes, uncertainty, provenance and temporary-file cleanup
+- [x] Missing configuration saves measurements only when available and never manufactures inferred styles; public links are never scraped
+- [x] Multiple creator-named presets, structured editing settings, immutable revisions and restoration as a new revision
+- [x] Real production briefs pin source IDs, approved guide/preferences, preset name/revision and editing settings; later changes cannot alter saved context
+- [x] Shared creative-context resolver consumed by media analysis and channel audits and available for future planning/writing/editing/publishing
+- [x] Workspace details remain editable in Settings; existing onboarding preferences are preserved
+- [x] Workspace export/deletion and source-derived evidence cleanup include new records
+- [x] Transactional creation limits, enqueue/delete races, source-identity/version/lease fences and exact quota release tested
+- [x] 73 repository tests passed with zero failures or skips; TypeScript and production build passed on 2026-11-14
+- [x] Isolated browser checks: guide save/lock/refresh, written reference, real video upload and measured result, reference comparison, preset edits/restoration, preset-to-project handoff with source footage, guide download and mobile layout
+- [ ] Live Gemini style extraction verified against authorized edited creator footage and written briefs
+- [ ] Live Firebase/deployed tenant isolation, monitoring, backup/deletion and operational acceptance verified
+- [ ] Automated permitted public-profile retrieval, PDF/Word parsing and direct third-party media access (not implemented; supplied sources are supported)
+- [ ] Advanced timeline assembly, preview, rendering, planning/writing and publishing features (future stages consuming the shared creative context)
+
+The real three-shot test video has decoded boundaries at 1 and 3 seconds and a 2-second average/median detected interval. The worker test saves actual measurements with an intentionally missing Gemini key. Seeded model fixtures validate schemas and adoption boundaries; they never become customer-visible sample findings. Browser QA used isolated disposable data and did not change the creator's existing workspace.

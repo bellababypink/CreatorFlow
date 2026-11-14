@@ -30,10 +30,12 @@ export interface VideoAnalysis {
 }
 export interface Analysis extends VideoAnalysis {
   id: string; workspaceId: string; assetId: string; createdAt: string; version: number;
+  creativeContext?: import('./dna.js').CreativeContext;
 }
 export type JobStatus = 'queued' | 'processing' | 'completed' | 'failed' | 'blocked_configuration';
 export interface Job {
-  id: string; workspaceId: string; assetId: string; type: 'media_ingestion' | 'video_analysis' | 'channel_sync' | 'channel_audit';
+  id: string; workspaceId: string; assetId: string; type: 'media_ingestion' | 'video_analysis' | 'channel_sync' | 'channel_audit' | 'style_analysis';
+  referenceId?: string; referenceVersion?: number;
   connectionId?: string; filters?: import('./channels').ChannelFilters;
   status: JobStatus; progress: number; stage: string; attempts: number; maxAttempts: number;
   error?: string | null; outputId?: string | null; createdAt: string; updatedAt: string;

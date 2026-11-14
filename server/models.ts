@@ -16,6 +16,7 @@ export interface StoredWorkspace extends Workspace {
     activeJobCount: number;
     deleting?: boolean;
     channelRevision?: number;
+    creativeRevision?: number;
 }
 export function publicAsset(asset: StoredAsset): MediaAsset { const { storageKey, thumbnailKey, sha256, activeJobId, deleting, ...safe } = asset; return safe; }
-export function publicWorkspace(workspace: StoredWorkspace): Workspace { const { storageBytes, activeJobCount, deleting, channelRevision, ...safe } = workspace; return safe; }
+export function publicWorkspace(workspace: StoredWorkspace): Workspace { const { storageBytes, activeJobCount, deleting, channelRevision, creativeRevision, ...safe } = workspace; return safe; }

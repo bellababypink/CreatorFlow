@@ -15,6 +15,41 @@ export type Write = {
     collection: string;
     value: RecordData;
 };
+export interface CreativeWriteGuards {
+    versions: ({ collection:string; id:string; version:number|null }|{collection:'assets';id:string;sourceSha256:string;storageKey:string})[];
+    jobId?:string; workerId?:string;
+    completion?:Record<string,unknown>;
+    createCollection?:'styleReferences'|'stylePresets';
+    inactiveJobIds?:string[];
+}
+function checkCreativeCreation(collection:NonNullable<CreativeWriteGuards['createCollection']>,count:number,writes:Write[],guards:CreativeWriteGuards){
+    const additions=writes.filter(w=>w.collection===collection);
+    if(additions.length!==1||!guards.versions.some(g=>g.collection===collection&&g.id===additions[0].value.id&&'version' in g&&g.version===null))throw new Error('Creative creation requires a new-record guard.');
+    const limit=collection==='styleReferences'?100:50;
+    if(count>=limit)throw new HttpError(413,`This workspace has reached its ${limit}-${collection==='styleReferences'?'reference':'preset'} limit.`, 'CREATIVE_LIMIT');
+}
+function checkInactiveCreativeJobs(jobs:any[],workspaceId:string){
+    if(jobs.some(job=>job&&(job.workspaceId!==workspaceId||['queued','processing'].includes(job.status))))throw new HttpError(409,'Wait for this reference’s analysis to finish before removing it.','REFERENCE_ANALYSIS_ACTIVE');
+}
+function checkCreativeJob(input:StoredJob,reference:any,asset:any){
+    if(input.type!=='style_analysis'||!input.referenceId||input.id!==`style_${input.referenceId}`)throw new Error('Invalid creative analysis job.');
+    if(!reference||reference.workspaceId!==input.workspaceId)throw new HttpError(404,'Creative reference not found.');
+    if(reference.version!==input.referenceVersion)throw new HttpError(409,'This reference changed. Refresh before requesting analysis.','CREATIVE_VERSION_CONFLICT');
+    if(reference.kind==='link')throw new HttpError(422,'Supply an authorized video or document to analyze this reference.','REFERENCE_UPLOAD_REQUIRED');
+    if(reference.kind==='video'&&(!asset||asset.workspaceId!==input.workspaceId||asset.deleting))throw new HttpError(409,'The source video is unavailable. Refresh before requesting analysis.','CREATIVE_VERSION_CONFLICT');
+}
+function checkCreativeCommit(workspace:any, workspaceId:string, writes:Write[], current:any[], guards:CreativeWriteGuards, job:any) {
+    if (!workspace || workspace.deleting) throw new HttpError(409, 'This workspace is unavailable.', 'WORKSPACE_UNAVAILABLE');
+    guards.versions.forEach((g,i)=>{
+        const value=current[i];
+        const changed='sourceSha256' in g ? !value || value.sha256!==g.sourceSha256 || value.storageKey!==g.storageKey : g.version===null ? value!=null : value?.version!==g.version;
+        if ((value && value.workspaceId !== workspaceId) || (g.collection==='assets'&&value?.deleting) || changed)
+            throw new HttpError(409,'This creative record changed. Refresh before saving.','CREATIVE_VERSION_CONFLICT');
+    });
+    if (guards.jobId && (!job || job.workspaceId!==workspaceId || job.workerId!==guards.workerId || job.status!=='processing' || !(Date.parse(job.leaseUntil||'')>=Date.now()))) throw new HttpError(409,'This analysis no longer owns its processing lease.','JOB_LEASE_LOST');
+    if (writes.length>100 || writes.some(w=>w.value.workspaceId!==workspaceId)) throw new Error('Invalid creative workspace write.');
+    if (writes.some(w=>Buffer.byteLength(JSON.stringify(w.value),'utf8')>800_000)) throw new HttpError(413,'This creative record is too large.');
+}
 export interface ChannelWriteGuards {
     jobId?: string; workerId?: string; importId?: string; dataRevision?: number; bumpRevision?: boolean;
 }
@@ -34,8 +69,10 @@ function checkChannelCommit(workspace: any, connection: any, workspaceId: string
     if (writes.length > 400 || writes.some(w => w.value.workspaceId !== workspaceId)) throw new Error('Invalid workspace-owned channel write.');
 }
 export interface Store {
+    commitCreativeWrites(workspaceId:string, writes:Write[], guards:CreativeWriteGuards, deletions?:{collection:string;id:string}[]):Promise<void>;
     commitChannelWrites(workspaceId: string, connectionId: string | null, generation: number | null, writes: Write[], guards?: ChannelWriteGuards): Promise<void>;
     enqueueChannelJob(job: StoredJob): Promise<StoredJob>;
+    enqueueCreativeJob(job:StoredJob):Promise<StoredJob>;
     get<T = RecordData>(collection: string, id: string): Promise<T | null>;
     put<T extends {
         id: string;
@@ -94,6 +131,29 @@ class SQLiteStore implements Store {
     constructor() {
         this.db.exec('PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000; CREATE TABLE IF NOT EXISTS records (collection TEXT NOT NULL, id TEXT NOT NULL, workspace_id TEXT, data TEXT NOT NULL, PRIMARY KEY(collection,id)); CREATE INDEX IF NOT EXISTS records_workspace ON records(collection,workspace_id);');
     }
+    async commitCreativeWrites(workspaceId:string,writes:Write[],guards:CreativeWriteGuards,deletions:{collection:string;id:string}[]=[]) {
+        this.db.exec('BEGIN IMMEDIATE');
+        try {
+            const read=(collection:string,id:string)=>{const r=this.db.prepare('SELECT data FROM records WHERE collection=? AND id=?').get(collection,id) as any;return r?JSON.parse(r.data):null;};
+            const workspace=read('workspaces',workspaceId),job=guards.jobId?read('jobs',guards.jobId):null;
+            checkCreativeCommit(workspace,workspaceId,writes,guards.versions.map(g=>read(g.collection,g.id)),guards,job);
+            checkInactiveCreativeJobs((guards.inactiveJobIds||[]).map(id=>read('jobs',id)),workspaceId);
+            let nextWorkspace=workspace;
+            if(guards.createCollection){
+                const row=this.db.prepare('SELECT COUNT(*) AS count FROM records WHERE collection=? AND workspace_id=?').get(guards.createCollection,workspaceId) as {count:number};
+                checkCreativeCreation(guards.createCollection,Number(row.count),writes,guards);
+                nextWorkspace={...nextWorkspace,creativeRevision:(workspace.creativeRevision||0)+1};
+            }
+            for (const op of writes) this.db.prepare('INSERT INTO records(collection,id,workspace_id,data) VALUES(?,?,?,?) ON CONFLICT(collection,id) DO UPDATE SET workspace_id=excluded.workspace_id,data=excluded.data').run(op.collection,op.value.id,workspaceId,JSON.stringify(op.value));
+            for (const op of deletions) {const current=read(op.collection,op.id);if(current?.workspaceId!==workspaceId)throw new HttpError(409,'Creative record ownership changed.');this.db.prepare('DELETE FROM records WHERE collection=? AND id=?').run(op.collection,op.id);}
+            if(guards.completion&&job){
+                if(job.slotReserved)nextWorkspace={...nextWorkspace,activeJobCount:Math.max(0,workspace.activeJobCount-1)};
+                this.db.prepare('UPDATE records SET data=? WHERE collection=? AND id=?').run(JSON.stringify({...job,...guards.completion,slotReserved:false,leaseUntil:null,updatedAt:new Date().toISOString(),version:job.version+1}),'jobs',job.id);
+            }
+            if(nextWorkspace!==workspace)this.db.prepare('UPDATE records SET data=? WHERE collection=? AND id=?').run(JSON.stringify(nextWorkspace),'workspaces',workspaceId);
+            this.db.exec('COMMIT');
+        } catch(error) {this.db.exec('ROLLBACK');throw error;}
+    }
     async commitChannelWrites(workspaceId: string, connectionId: string | null, generation: number | null, writes: Write[], guards: ChannelWriteGuards = {}) {
         this.db.exec('BEGIN IMMEDIATE');
         try {
@@ -107,12 +167,14 @@ class SQLiteStore implements Store {
             this.db.exec('COMMIT');
         } catch (error) { this.db.exec('ROLLBACK'); throw error; }
     }
-    async enqueueChannelJob(input: StoredJob) {
+    async enqueueCreativeJob(input:StoredJob){return this.enqueueChannelJob(input,true);}
+    async enqueueChannelJob(input: StoredJob,creative=false) {
         this.db.exec('BEGIN IMMEDIATE');
         try {
             const read = (collection: string, id: string) => {const row = this.db.prepare('SELECT data FROM records WHERE collection=? AND id=?').get(collection, id) as any; return row ? JSON.parse(row.data) : null;};
             const workspace = enqueueWorkspace(read('workspaces', input.workspaceId), 0);
             const previous = read('jobs', input.id);
+            if(creative){const reference=read('styleReferences',input.referenceId||'');checkCreativeJob(input,reference,reference?.assetId?read('assets',reference.assetId):null);}
             if (previous && ['queued', 'processing'].includes(previous.status)) throw new HttpError(409, 'This operation is already in the creative queue.', 'JOB_EXISTS');
             const job = {...input, slotReserved: true, version: (previous?.version || 0) + 1};
             for (const [collection, value] of [['workspaces', workspace], ['jobs', job]] as const) this.db.prepare('INSERT INTO records(collection,id,workspace_id,data) VALUES(?,?,?,?) ON CONFLICT(collection,id) DO UPDATE SET workspace_id=excluded.workspace_id,data=excluded.data').run(collection, value.id, 'workspaceId' in value ? String(value.workspaceId) : null, JSON.stringify(value));
@@ -300,6 +362,36 @@ class SQLiteStore implements Store {
 class FirestoreStore implements Store {
     db;
     constructor() { initializeFirebase(); this.db = getFirestore(); }
+    async commitCreativeWrites(workspaceId:string,writes:Write[],guards:CreativeWriteGuards,deletions:{collection:string;id:string}[]=[]) {
+        await this.db.runTransaction(async tx=>{
+            const workspace=(await tx.get(this.db.collection('workspaces').doc(workspaceId))).data();
+            const current=[];
+            for(const g of guards.versions)current.push((await tx.get(this.db.collection(g.collection).doc(g.id))).data());
+            const job=guards.jobId?(await tx.get(this.db.collection('jobs').doc(guards.jobId))).data():null;
+            const deleted=[];
+            for(const op of deletions)deleted.push((await tx.get(this.db.collection(op.collection).doc(op.id))).data());
+            checkCreativeCommit(workspace,workspaceId,writes,current,guards,job);
+            const inactiveJobs=[];
+            for(const id of guards.inactiveJobIds||[])inactiveJobs.push((await tx.get(this.db.collection('jobs').doc(id))).data());
+            checkInactiveCreativeJobs(inactiveJobs,workspaceId);
+            const workspacePatch:Record<string,number>={};
+            if(guards.createCollection){
+                // Read the real inventory for old workspaces as well as new ones.
+                // Updating this shared workspace record serializes concurrent creators.
+                const inventory=await tx.get(this.db.collection(guards.createCollection).where('workspaceId','==',workspaceId).select('id'));
+                checkCreativeCreation(guards.createCollection,inventory.size,writes,guards);
+                workspacePatch.creativeRevision=(workspace!.creativeRevision||0)+1;
+            }
+            if(deleted.some(r=>r?.workspaceId!==workspaceId))throw new HttpError(409,'Creative record ownership changed.');
+            for(const op of writes)tx.set(this.db.collection(op.collection).doc(op.value.id),JSON.parse(JSON.stringify(op.value)));
+            for(const op of deletions)tx.delete(this.db.collection(op.collection).doc(op.id));
+            if(guards.completion&&job){
+                if(job.slotReserved)workspacePatch.activeJobCount=Math.max(0,workspace!.activeJobCount-1);
+                tx.set(this.db.collection('jobs').doc(job.id),JSON.parse(JSON.stringify({...job,...guards.completion,slotReserved:false,leaseUntil:null,updatedAt:new Date().toISOString(),version:job.version+1})));
+            }
+            if(Object.keys(workspacePatch).length)tx.update(this.db.collection('workspaces').doc(workspaceId),workspacePatch);
+        });
+    }
     async commitChannelWrites(workspaceId: string, connectionId: string | null, generation: number | null, writes: Write[], guards: ChannelWriteGuards = {}) {
         await this.db.runTransaction(async tx => {
             const workspaceRef = this.db.collection('workspaces').doc(workspaceId);
@@ -313,11 +405,17 @@ class FirestoreStore implements Store {
             if (guards.bumpRevision || writes.some(w => ['socialConnections', 'socialPosts', 'analyticsSnapshots', 'channelImports'].includes(w.collection))) tx.update(workspaceRef, {channelRevision: (workspace!.channelRevision || 0) + 1});
         });
     }
-    async enqueueChannelJob(input: StoredJob) {
+    async enqueueCreativeJob(input:StoredJob){return this.enqueueChannelJob(input,true);}
+    async enqueueChannelJob(input: StoredJob,creative=false) {
         return this.db.runTransaction(async tx => {
             const workspaceRef = this.db.collection('workspaces').doc(input.workspaceId), jobRef = this.db.collection('jobs').doc(input.id);
             const workspace = enqueueWorkspace((await tx.get(workspaceRef)).data() as StoredWorkspace || null, 0);
             const previous = (await tx.get(jobRef)).data();
+            if(creative){
+                const reference=(await tx.get(this.db.collection('styleReferences').doc(input.referenceId||'_invalid'))).data();
+                const asset=reference?.assetId?(await tx.get(this.db.collection('assets').doc(reference.assetId))).data():null;
+                checkCreativeJob(input,reference,asset);
+            }
             if (previous && ['queued','processing'].includes(previous.status)) throw new HttpError(409, 'This operation is already in the creative queue.', 'JOB_EXISTS');
             const job = {...input, slotReserved: true, version: (previous?.version || 0) + 1};
             tx.set(workspaceRef, JSON.parse(JSON.stringify(workspace))); tx.set(jobRef, JSON.parse(JSON.stringify(job))); return job;

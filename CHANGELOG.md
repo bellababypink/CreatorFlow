@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.0 — Creator DNA & Style Intelligence, 2026-11-14
+
+- Added a visual Creator DNA workspace, authorized reference library, editable creative guide, explicit pattern adoption and administrator guide locking.
+- Added real FFmpeg shot measurements and asynchronous Gemini video/text style extraction with source evidence, uncertainty and configuration states. Saved links are never scraped or silently analyzed.
+- Added immutable named-preset revisions, restoration as a new revision, and real production briefs with pinned guide/preset settings. Existing media analysis and channel audits consume the shared creative context.
+- Added transactional creative writes, source/worker/version fencing, workspace export/deletion coverage, and source-derived evidence cleanup. Existing preferences and customer data are preserved.
+- Verified 73 tests with zero skips, TypeScript, the production build, and isolated desktop/mobile workflows including real shot measurements and preset-to-project handoff. Live Gemini extraction and deployed Firebase verification remain configuration-dependent gates.
+
 ## 0.2.0 — Channel Intelligence, 2026-11-13
 
 - Replaced the channel placeholder with real setup/connection controls, source-labelled analytics, filters, post evidence, manual imports, and downloadable reports while preserving the existing app.

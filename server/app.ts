@@ -18,6 +18,9 @@ import type { Analysis, User } from '../shared/types.js';
 import { getProviderStatuses } from './providers/index.js';
 import { channelsRouter, youtubeOAuthCallback } from './channels/routes.js';
 import { revokeYouTubeConnection } from './channels/oauth.js';
+import { dnaRouter } from './dna/routes.js';
+import { CREATIVE_COLLECTIONS } from './dna/service.js';
+import type { ReferenceAnalysis, StyleReference } from '../shared/dna.js';
 export const app = express();
 app.disable('x-powered-by');
 app.use((_req, res, next) => { res.set({ 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'same-origin', 'Cross-Origin-Resource-Policy': 'same-origin' }); next(); });
@@ -125,6 +128,7 @@ app.post('/api/auth/firebase', async (req, res) => {
 app.post('/api/auth/signout', async (req, res) => { await deleteSession(req, res); res.json({ success: true }); });
 app.get('/api/channels/oauth/youtube/callback', authenticate, youtubeOAuthCallback);
 app.use('/api/workspaces/:workspaceId/channels', channelsRouter);
+app.use('/api/workspaces/:workspaceId/dna', dnaRouter);
 app.get('/api/me', authenticate, async (req, res) => {
     const memberships = await store.list<any>('memberships', 'userId', req.user!.id);
     const workspaces = await Promise.all(memberships.map(async (m) => { const w = await store.get<StoredWorkspace>('workspaces', m.workspaceId); return w ? { ...publicWorkspace(w), role: m.role } : null; }));
@@ -234,10 +238,14 @@ app.delete('/api/workspaces/:workspaceId/assets/:assetId', authenticate, edit, a
         throw new HttpError(409, 'Wait for processing to finish before deleting this video.');
     const deletion = await store.beginAssetDeletion(asset.workspaceId, asset.id);
     const analyses = (await store.list<Analysis>('analyses', 'workspaceId', asset.workspaceId)).filter(a => a.assetId === asset.id);
+    // Source deletion also removes source-derived reference evidence. Approved
+    // preferences and production snapshots are independent creator decisions.
+    const references = (await store.list<StyleReference>('styleReferences', 'workspaceId', asset.workspaceId)).filter(r => r.assetId === asset.id);
+    const styleAnalyses = (await store.list<ReferenceAnalysis>('styleAnalyses', 'workspaceId', asset.workspaceId)).filter(a => a.assetId === asset.id || references.some(r => r.id === a.referenceId));
     await deleteFile(asset.storageKey);
     if (asset.thumbnailKey)
         await deleteFile(asset.thumbnailKey);
-    const operations = [...jobs.map(j => ({ collection: 'jobs', id: j.id })), ...analyses.map(a => ({ collection: 'analyses', id: a.id }))];
+    const operations = [...jobs.map(j => ({ collection: 'jobs', id: j.id })), ...analyses.map(a => ({ collection: 'analyses', id: a.id })), ...references.map(r=>({collection:'styleReferences',id:r.id})), ...styleAnalyses.map(a=>({collection:'styleAnalyses',id:a.id}))];
     for (let index = 0; index < operations.length; index += 400)
         await store.batch(operations.slice(index, index + 400));
     await store.finishAssetDeletion(asset.workspaceId, asset.id, deletion.token);
@@ -249,7 +257,7 @@ app.get('/api/workspaces/:workspaceId/providers', authenticate, read, async (_re
 app.get('/api/workspaces/:workspaceId/export', authenticate, admin, async (req, res) => {
     const workspaceId = String(req.params.workspaceId), workspace = await store.get<StoredWorkspace>('workspaces', workspaceId);
     const data: any = { exportedAt: new Date().toISOString(), schemaVersion: 1, workspace: workspace && publicWorkspace(workspace) };
-    for (const collection of ['memberships', 'assets', 'analyses', 'jobs', 'auditLogs', 'usage', 'socialConnections', 'socialPosts', 'analyticsSnapshots', 'analyticsSnapshotParts', 'channelImports', 'channelAudits'])
+    for (const collection of ['memberships', 'assets', 'analyses', 'jobs', 'auditLogs', 'usage', 'socialConnections', 'socialPosts', 'analyticsSnapshots', 'analyticsSnapshotParts', 'channelImports', 'channelAudits', ...CREATIVE_COLLECTIONS])
         data[collection] = await store.list<any>(collection, 'workspaceId', workspaceId);
     data.assets = data.assets.map(publicAsset);
     res.set('Content-Disposition', `attachment; filename="creatorflow-${workspaceId}.json"`);
@@ -280,7 +288,7 @@ app.delete('/api/workspaces/:workspaceId', authenticate, workspaceAccess(['owner
         collection: string;
         id: string;
     }[] = [];
-    for (const collection of ['memberships', 'assets', 'analyses', 'jobs', 'auditLogs', 'usage', 'assetDigests', 'assetDeletions', 'socialConnections', 'socialPosts', 'analyticsSnapshots', 'analyticsSnapshotParts', 'channelImports', 'channelAudits', 'channelAuditInputs', 'channelSecrets', 'channelOAuthStates'])
+    for (const collection of ['memberships', 'assets', 'analyses', 'jobs', 'auditLogs', 'usage', 'assetDigests', 'assetDeletions', 'socialConnections', 'socialPosts', 'analyticsSnapshots', 'analyticsSnapshotParts', 'channelImports', 'channelAudits', 'channelAuditInputs', 'channelSecrets', 'channelOAuthStates', ...CREATIVE_COLLECTIONS])
         for (const record of await store.list<any>(collection, 'workspaceId', workspaceId))
             deletes.push({ collection, id: record.id });
     for (let index = 0; index < deletes.length; index += 400)
